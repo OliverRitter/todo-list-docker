@@ -1,0 +1,192 @@
+import express from "express";
+import { createServer } from "http";
+import { Server } from "socket.io";
+import cors from "cors";
+import pkg from "pg";
+const { Pool } = pkg;
+import { drizzle } from "drizzle-orm/node-postgres";
+import { sql } from "drizzle-orm";
+import { parse as parseCookie } from "cookie-es";
+import * as schema from "./db/schema.js";
+import { z } from "zod";
+
+const app = express();
+const httpServer = createServer(app);
+
+app.use(cors({ origin: "http://localhost:3000", credentials: true }));
+app.use(express.json());
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const db = drizzle(pool, { schema });
+
+const io = new Server(httpServer, {
+  cors: {
+    origin: "http://localhost:3000",
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+  allowEIO3: true,
+  transports: ["polling", "websocket"],
+  pingTimeout: 60000,
+  pingInterval: 25000,
+});
+
+const backendTaskSchema = z.object({
+  title: z.string().min(3),
+  category: z.enum(["Work", "Shopping", "Personal"]),
+  dueDate: z.string().min(1),
+  lat: z.number().or(z.string().refine((val) => !isNaN(parseFloat(val)))),
+  lng: z.number().or(z.string().refine((val) => !isNaN(parseFloat(val)))),
+  city: z.string().nullable().optional(),
+  country: z.string().nullable().optional(),
+});
+
+function getCookieValue(cookieHeader: string, name: string): string | null {
+  if (!cookieHeader) return null;
+  const pairs = cookieHeader.split(";");
+  for (const pair of pairs) {
+    const [key, value] = pair.split("=");
+    if (key && key.trim() === name && value) {
+      const decodedValue = decodeURIComponent(value.trim());
+      return decodedValue.split(".").at(0) || decodedValue;
+    }
+  }
+  return null;
+}
+
+io.use(async (socket, next) => {
+  try {
+    const rawCookies = socket.handshake.headers.cookie;
+    if (!rawCookies)
+      return next(new Error("Authentication failed: No cookies"));
+
+    const parsed = parseCookie(rawCookies);
+    const rawToken = parsed["better-auth.session_token"];
+    if (!rawToken)
+      return next(new Error("Authentication failed: No session token"));
+
+    const sessionToken = rawToken.split(".").at(0) || rawToken;
+
+    const sessionResult = await db.execute(sql`
+      SELECT s.user_id, u.name as user_name 
+      FROM "session" s
+      INNER JOIN "user" u ON s.user_id = u.id
+      WHERE s.token = ${sessionToken} AND s.expires_at > CURRENT_TIMESTAMP
+      LIMIT 1;
+    `);
+
+    if (!sessionResult?.rows?.length)
+      return next(new Error("Authentication failed: Invalid session"));
+
+    const activeRow = sessionResult.rows.at(0);
+    if (!activeRow)
+      return next(new Error("Authentication failed: Malformed row payload"));
+
+    (socket as any).userId = activeRow.user_id;
+    (socket as any).userName = activeRow.user_name;
+
+    next();
+  } catch (err: any) {
+    console.error("❌ Handshake connection exception:", err?.message || err);
+    next(new Error("Authentication middleware crash"));
+  }
+});
+
+app.get("/api/todos", async (req, res) => {
+  try {
+    const { lng, lat, radius } = req.query;
+
+    if (!lng || !lat) {
+      const rawTodos = await db.execute(sql`
+        SELECT id, title, category, due_date, creator_id, creator_name, city, country, created_at,
+               ST_X(location::geometry) as lng, 
+               ST_Y(location::geometry) as lat 
+        FROM todos 
+        ORDER BY created_at DESC
+      `);
+      return res.json(rawTodos.rows);
+    }
+
+    const centerLng = parseFloat(lng as string);
+    const centerLat = parseFloat(lat as string);
+    const searchRadiusMeters = radius ? parseFloat(radius as string) : 10000;
+
+    const filteredTodos = await db.execute(sql`
+      SELECT id, title, category, due_date, creator_id, creator_name, city, country, created_at,
+             ST_X(location::geometry) as lng, 
+             ST_Y(location::geometry) as lat,
+             ST_Distance(location::geography, ST_SetSRID(ST_MakePoint(${centerLng}, ${centerLat}), 4326)::geography) as distance_meters
+      FROM todos 
+      WHERE ST_DWithin(
+        location::geography, 
+        ST_SetSRID(ST_MakePoint(${centerLng}, ${centerLat}), 4326)::geography, 
+        ${searchRadiusMeters}
+      )
+      ORDER BY distance_meters ASC
+    `);
+
+    res.json(filteredTodos.rows);
+  } catch (err) {
+    console.error("❌ Spatial query lookup failure:", err);
+    res
+      .status(500)
+      .json({ error: "Failed to fetch filtered spatial data track" });
+  }
+});
+
+app.delete("/api/todos/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.execute(sql`
+      DELETE FROM todos WHERE id = ${id} RETURNING id;
+    `);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Task node not found" });
+    }
+
+    io.emit("task-deleted", id);
+
+    return res.status(200).json({ success: true, deletedId: id });
+  } catch (err) {
+    console.error("❌ SQL Deletion crash:", err);
+    return res.status(500).json({ error: "Database execution error" });
+  }
+});
+
+io.on("connection", (socket) => {
+  socket.on("broadcast-task", async (payload) => {
+    try {
+      const parsedPayload = backendTaskSchema.parse(payload);
+
+      const { title, category, dueDate, city, country } = parsedPayload;
+      const lat = parseFloat(String(parsedPayload.lat));
+      const lng = parseFloat(String(parsedPayload.lng));
+
+      const creatorId = (socket as any).userId;
+      const creatorName = (socket as any).userName;
+      const parsedDate = new Date(dueDate);
+
+      const newTodoRows = await db.execute(sql`
+        INSERT INTO todos (title, category, due_date, creator_id, creator_name, lat, lng, city, country, location)
+        VALUES (${title}, ${category}, ${parsedDate}, ${creatorId}, ${creatorName}, ${String(lat)}, ${String(lng)}, ${city || null}, ${country || null}, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326))
+        RETURNING id, title, category, due_date, creator_id, creator_name, city, country, created_at,
+                  ST_X(location::geometry) as lng,
+                  ST_Y(location::geometry) as lat
+      `);
+
+      io.emit("task-synced", newTodoRows.rows);
+    } catch (err: any) {
+      console.error("❌ Server Rejected Task Broadcast:", err?.message || err);
+      socket.emit("error-alert", {
+        message:
+          "Input data schema check failed. Rejected by backend firewall.",
+      });
+    }
+  });
+});
+
+httpServer.listen(4000, () => {
+  console.log("🚀 Real-Time Spatial Backend running on port 4000");
+});
