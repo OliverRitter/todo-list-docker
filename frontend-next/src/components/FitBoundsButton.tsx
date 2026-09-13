@@ -34,8 +34,8 @@ export function FitBoundsButton({ todos }: FitBoundsButtonProps) {
     map.invalidateSize();
 
     map.flyToBounds(bounds, {
-      padding: [20, 20],
-      maxZoom: 15,
+      padding: [80, 80],
+      maxZoom: 10,
       animate: true,
       duration: 1.5,
     });

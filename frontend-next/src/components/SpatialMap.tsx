@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { FitBoundsButton } from "./FitBoundsButton";
+import type { SpatialTodo } from "@/store/useSpatialStore";
 
 const createPulseIcon = (category: string) => {
   const colorMap: Record<string, string> = {
@@ -24,53 +25,132 @@ const createPulseIcon = (category: string) => {
     className: "custom-pulse-leaflet-marker",
     iconSize: [25, 41],
     iconAnchor: [12, 41],
-    iconSize: [25, 41],
     popupAnchor: [0, -10],
   });
 };
 
-function MapController({ latestTodo }: { latestTodo: any }) {
+const createMutedIcon = () =>
+  L.divIcon({
+    html: '<span class="block h-3 w-3 rounded-full border border-slate-400 bg-slate-400/60 shadow-sm"></span>',
+    className: "muted-leaflet-marker",
+    iconSize: [12, 12],
+    iconAnchor: [6, 6],
+  });
+
+function MapController({
+  todos,
+  filteredTodos,
+  filterKey,
+  sidebarOpen,
+}: {
+  todos: SpatialTodo[];
+  filteredTodos: SpatialTodo[];
+  filterKey: string;
+  sidebarOpen: boolean;
+}) {
   const map = useMap();
+  const previousFilterKey = useRef(filterKey);
+  const previousTodoIds = useRef<string[]>([]);
+  const previousFilteredTodoIds = useRef<string[]>([]);
+  const needsFilterFit = useRef(false);
+  const hasInitialized = useRef(false);
 
   useEffect(() => {
     if (!map) return;
     map.invalidateSize();
 
-    if (latestTodo?.lat && latestTodo?.lng) {
-      const latFloat = parseFloat(latestTodo.lat);
-      const lngFloat = parseFloat(latestTodo.lng);
+    const resizeTimer = window.setTimeout(() => {
+      map.invalidateSize({ animate: false, pan: false });
+    }, 350);
 
-      if (!isNaN(latFloat) && !isNaN(lngFloat)) {
-        map.flyTo([latFloat, lngFloat], 13, { animate: true, duration: 1.2 });
+    return () => window.clearTimeout(resizeTimer);
+  }, [map, sidebarOpen]);
+
+  useEffect(() => {
+    if (!map) return;
+
+    const todoIds = todos.map((todo) => todo.id);
+    if (previousFilterKey.current !== filterKey) {
+      previousFilterKey.current = filterKey;
+      needsFilterFit.current = true;
+    }
+
+    const previousIds = previousTodoIds.current;
+    const filteredTodoIds = filteredTodos.map((todo) => todo.id);
+    const previousFilteredIds = previousFilteredTodoIds.current;
+    const filteredIdsChanged =
+      previousFilteredIds.length !== filteredTodoIds.length ||
+      previousFilteredIds.some((id, index) => id !== filteredTodoIds[index]);
+
+    const fitTodos = (source: SpatialTodo[]) => {
+      const points = source
+        .filter(
+          (todo) =>
+            Number.isFinite(Number(todo.lat)) &&
+            Number.isFinite(Number(todo.lng)),
+        )
+        .map((todo) => [Number(todo.lat), Number(todo.lng)] as [number, number]);
+
+      if (points.length > 0) {
+        map.fitBounds(points, { padding: [100, 100], maxZoom: 10 });
+      }
+    };
+
+    if (!hasInitialized.current && todos.length > 0) {
+      fitTodos(todos);
+      hasInitialized.current = true;
+    } else if (
+      hasInitialized.current &&
+      needsFilterFit.current &&
+      filteredIdsChanged
+    ) {
+      fitTodos(filteredTodos);
+      needsFilterFit.current = false;
+    } else if (hasInitialized.current) {
+      const previousIdSet = new Set(previousIds);
+      const newTodo = todos.find((todo) => !previousIdSet.has(todo.id));
+      if (
+        newTodo &&
+        Number.isFinite(Number(newTodo.lat)) &&
+        Number.isFinite(Number(newTodo.lng))
+      ) {
+        map.flyTo([Number(newTodo.lat), Number(newTodo.lng)], 13, {
+          animate: true,
+          duration: 1.2,
+        });
       }
     }
-  }, [latestTodo, map]);
+
+    previousTodoIds.current = todoIds;
+    previousFilteredTodoIds.current = filteredTodoIds;
+  }, [filterKey, filteredTodos, map, todos]);
 
   return null;
 }
 
 interface MapProps {
-  todos: any[];
+  todos: SpatialTodo[];
+  filteredTodos: SpatialTodo[];
+  filterKey: string;
 }
 
-export default function SpatialMap({ todos }: MapProps) {
-  const [isMounted, setIsMounted] = useState(false);
+export default function SpatialMap({
+  todos,
+  filteredTodos,
+  filterKey,
+  sidebarOpen,
+}: MapProps) {
   const mapRef = useRef<L.Map | null>(null);
-  const latestTodo = todos[0];
 
   useEffect(() => {
-    setIsMounted(true);
-    return () => setIsMounted(false);
+    return () => {
+      mapRef.current?.remove();
+      mapRef.current = null;
+    };
   }, []);
 
-  if (!isMounted) {
-    return (
-      <div className="w-full h-[400px] bg-slate-100 dark:bg-slate-900 rounded-2xl animate-pulse" />
-    );
-  }
-
   return (
-    <div className="w-full rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-sm z-0 relative h-[400px]">
+    <div className="relative z-0 h-full w-full overflow-hidden border-l border-slate-200 shadow-sm dark:border-slate-800">
       <MapContainer
         center={[0, 0]}
         zoom={2}
@@ -84,7 +164,12 @@ export default function SpatialMap({ todos }: MapProps) {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
-        <MapController latestTodo={latestTodo} />
+        <MapController
+          todos={todos}
+          filteredTodos={filteredTodos}
+          filterKey={filterKey}
+          sidebarOpen={sidebarOpen}
+        />
         <FitBoundsButton todos={todos} />
 
         {todos.map((todo) => {
@@ -92,9 +177,13 @@ export default function SpatialMap({ todos }: MapProps) {
 
           return (
             <Marker
-              key={todo.id || Math.random()}
-              position={[parseFloat(todo.lat), parseFloat(todo.lng)]}
-              icon={createPulseIcon(todo.category)}
+              key={todo.id}
+              position={[Number(todo.lat), Number(todo.lng)]}
+              icon={
+                filteredTodos.some((filteredTodo) => filteredTodo.id === todo.id)
+                  ? createPulseIcon(todo.category)
+                  : createMutedIcon()
+              }
             >
               <Popup>
                 <div className="text-slate-900 font-sans p-1 min-w-[140px] space-y-2">
@@ -110,6 +199,12 @@ export default function SpatialMap({ todos }: MapProps) {
                   {todo.city && (
                     <p className="text-[10px] font-semibold text-indigo-600 bg-indigo-50/50 px-1.5 py-0.5 rounded w-fit">
                       🏙️ {todo.city}, {todo.country || ""}
+                    </p>
+                  )}
+
+                  {todo.distanceKm !== null && todo.distanceKm !== undefined && (
+                    <p className="text-[10px] font-mono text-emerald-600">
+                      {Number(todo.distanceKm).toFixed(2)} km away
                     </p>
                   )}
 

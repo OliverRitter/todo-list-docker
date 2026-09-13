@@ -5,9 +5,10 @@ import cors from "cors";
 import pkg from "pg";
 const { Pool } = pkg;
 import { drizzle } from "drizzle-orm/node-postgres";
-import { sql } from "drizzle-orm";
+import { and, asc, desc, ilike, or, sql } from "drizzle-orm";
 import { parse as parseCookie } from "cookie-es";
 import * as schema from "./db/schema.js";
+import { todos } from "./db/schema.js";
 import { z } from "zod";
 
 const app = express();
@@ -94,38 +95,78 @@ io.use(async (socket, next) => {
 
 app.get("/api/todos", async (req, res) => {
   try {
-    const { lng, lat, radius } = req.query;
+    const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+    const timeframe = req.query.timeframe === "past" || req.query.timeframe === "future"
+      ? req.query.timeframe
+      : "all";
+    const sortBy = req.query.sortBy === "dueDate" || req.query.sortBy === "distance"
+      ? req.query.sortBy
+      : "createdAt";
+    const distanceOrder = req.query.distanceOrder === "desc" ? "desc" : "asc";
+    const maxDistanceKm = Number.parseFloat(String(req.query.maxDistanceKm));
+    const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
+    const limit = Math.min(10000, Math.max(1, Number.parseInt(String(req.query.limit || "10"), 10) || 10));
+    const centerLat = Number.parseFloat(String(req.query.lat));
+    const centerLng = Number.parseFloat(String(req.query.lng));
+    const hasCenter = Number.isFinite(centerLat) && Number.isFinite(centerLng);
+    const now = new Date();
+    const filters = [];
 
-    if (!lng || !lat) {
-      const rawTodos = await db.execute(sql`
-        SELECT id, title, category, due_date, creator_id, creator_name, city, country, created_at,
-               ST_X(location::geometry) as lng, 
-               ST_Y(location::geometry) as lat 
-        FROM todos 
-        ORDER BY created_at DESC
-      `);
-      return res.json(rawTodos.rows);
+    if (search) {
+      const pattern = `%${search}%`;
+      filters.push(or(ilike(todos.title, pattern), ilike(todos.creatorName, pattern)));
     }
+    if (timeframe === "future") filters.push(sql`${todos.dueDate} >= ${now}`);
+    if (timeframe === "past") filters.push(sql`${todos.dueDate} < ${now}`);
 
-    const centerLng = parseFloat(lng as string);
-    const centerLat = parseFloat(lat as string);
-    const searchRadiusMeters = radius ? parseFloat(radius as string) : 10000;
+    const distanceKm = hasCenter
+      ? sql<number>`ST_Distance(${todos.location}::geography, ST_SetSRID(ST_MakePoint(${centerLng}, ${centerLat}), 4326)::geography) / 1000`
+      : sql<number>`NULL`;
+    if (hasCenter && Number.isFinite(maxDistanceKm) && maxDistanceKm > 0) {
+      filters.push(sql`ST_DWithin(${todos.location}::geography, ST_SetSRID(ST_MakePoint(${centerLng}, ${centerLat}), 4326)::geography, ${maxDistanceKm * 1000})`);
+    }
+    const filteredWhereClause = filters.length ? and(...filters) : undefined;
+    const orderBy = sortBy === "dueDate"
+      ? asc(todos.dueDate)
+      : sortBy === "distance" && hasCenter
+        ? distanceOrder === "desc" ? desc(distanceKm) : asc(distanceKm)
+        : desc(todos.createdAt);
 
-    const filteredTodos = await db.execute(sql`
-      SELECT id, title, category, due_date, creator_id, creator_name, city, country, created_at,
-             ST_X(location::geometry) as lng, 
-             ST_Y(location::geometry) as lat,
-             ST_Distance(location::geography, ST_SetSRID(ST_MakePoint(${centerLng}, ${centerLat}), 4326)::geography) as distance_meters
-      FROM todos 
-      WHERE ST_DWithin(
-        location::geography, 
-        ST_SetSRID(ST_MakePoint(${centerLng}, ${centerLat}), 4326)::geography, 
-        ${searchRadiusMeters}
-      )
-      ORDER BY distance_meters ASC
-    `);
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(todos)
+      .where(filteredWhereClause);
+    const total = Number(count);
+    const items = await db
+      .select({
+        id: todos.id,
+        title: todos.title,
+        category: todos.category,
+        due_date: todos.dueDate,
+        creator_id: todos.creatorId,
+        creator_name: todos.creatorName,
+        city: todos.city,
+        country: todos.country,
+        created_at: todos.createdAt,
+        lng: sql<number>`ST_X(${todos.location}::geometry)`,
+        lat: sql<number>`ST_Y(${todos.location}::geometry)`,
+        distanceKm,
+      })
+      .from(todos)
+      .where(filteredWhereClause)
+      .orderBy(orderBy)
+      .limit(limit)
+      .offset((page - 1) * limit);
 
-    res.json(filteredTodos.rows);
+    return res.json({
+      items,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    });
   } catch (err) {
     console.error("❌ Spatial query lookup failure:", err);
     res
