@@ -74,9 +74,6 @@ export const todos = pgTable("todos", {
   city: text("city"),
   country: text("country"),
 
-  lat: text("lat").notNull(),
-  lng: text("lng").notNull(),
-
   location: geometry("location").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

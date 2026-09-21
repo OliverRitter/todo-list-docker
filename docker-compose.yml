@@ -18,14 +18,17 @@ services:
       retries: 5
 
   backend_node:
-    image: node:22-alpine
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
     container_name: g2-runtime-node
     working_dir: /app
     volumes:
       - ./backend:/app
       # Mask node_modules to avoid host vs container file lock conflict loops
       - /app/node_modules
-    command: sh -c "npm install && npx tsx --watch src/index.ts"
+    command: sh -c "npm install && npx tsx src/db/bootstrap.ts && npx tsx --watch src/index.ts"
     env_file:
       - .env
     environment:
@@ -39,7 +42,10 @@ services:
     restart: unless-stopped
 
   frontend_next:
-    image: node:22-alpine
+    build:
+      context: ./frontend-next
+      dockerfile: Dockerfile
+      target: development
     container_name: g2-runtime-next
     working_dir: /app
     volumes:
@@ -66,4 +72,7 @@ services:
       - "5050:80" # 🎯 Maps pgAdmin to port 5050 on your laptop
 
 volumes:
+  # Points at the pre-existing volume where the real todo data lives (created under the todo-list-docker-2 project name)
   g2_db_store:
+    external: true
+    name: todo-list-docker-2_g2_db_store

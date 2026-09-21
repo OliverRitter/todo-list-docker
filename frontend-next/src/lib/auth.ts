@@ -17,12 +17,8 @@ const db = drizzle(pool, { schema });
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
     provider: "pg",
-    useCaseInsensitiveFields: true,
   }),
-  advanced: {
-    mapToSnakeCase: true,
-  },
-  trustedOrigins: ["http://localhost:3000"],
+  trustedOrigins: [process.env.FRONTEND_ORIGIN || "http://localhost:3000"],
   emailAndPassword: {
     enabled: true,
   },

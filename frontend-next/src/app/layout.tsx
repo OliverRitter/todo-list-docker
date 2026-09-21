@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "G2 Spatial Core Workspace",
+  title: "Todo app",
   description: "Real-time PostGIS mapping engine cluster",
 };
 

@@ -15,7 +15,7 @@ export default function TaskList() {
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h4 className="text-xs font-bold truncate text-slate-800 dark:text-slate-100">
-                {todo.title}
+                {todo.title} · {todo.creator_name}
               </h4>
               <p className="text-[10px] font-mono text-slate-400">
                 {todo.category} · {todo.city || "Unmapped"}

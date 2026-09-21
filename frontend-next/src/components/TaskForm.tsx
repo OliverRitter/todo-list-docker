@@ -4,32 +4,51 @@ import { useForm, Controller, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useSpatialStore } from "@/store/useSpatialStore";
-import LocationDropdown, {
-  type LocationDropdownHandle,
-} from "./LocationDropdown";
-import { useRef } from "react";
+import LocationDropdown from "./LocationDropdown";
+import { useState } from "react";
 
 const taskFormSchema = z.object({
   title: z.string().min(3, "Task title must be at least 3 characters long"),
   category: z.enum(["Work", "Shopping", "Personal"]),
-  dueDate: z.string().min(1, "Please select a valid date"),
+  dueDate: z
+    .string()
+    .min(1, "Please select a valid date")
+    .refine((dateStr) => {
+      const selectedDate = new Date(dateStr);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      return selectedDate >= today;
+    }, "Due date cannot be set in the past"),
   spatialData: z.object(
     {
-      lat: z.number(),
-      lng: z.number(),
-      city: z.string(),
-      country: z.string(),
+      lat: z
+        .number()
+        .min(-90, "Latitude cannot be less than -90 degrees")
+        .max(90, "Latitude cannot exceed 90 degrees"),
+      lng: z
+        .number()
+        .min(-180, "Longitude cannot be less than -180 degrees")
+        .max(180, "Longitude cannot exceed 180 degrees"),
+      city: z.string().min(1, "City identifier is required"),
+      country: z.string().min(1, "Country identifier is required"),
     },
-    { required_error: "Please search and select a targeting location vector" },
+    { error: "Please search and select a targeting location vector" },
   ),
 });
 
 type TaskFormData = z.infer<typeof taskFormSchema>;
 
+interface BroadcastTaskAck {
+  ok: boolean;
+  message?: string;
+}
+
 export default function TaskForm() {
   const socket = useSpatialStore((state) => state.socket);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [locationResetSignal, setLocationResetSignal] = useState(0);
 
-  const dropdownRef = useRef<LocationDropdownHandle>(null);
+  const todayString = new Date().toISOString().split("T")[0];
 
   const {
     register,
@@ -55,10 +74,14 @@ export default function TaskForm() {
   const onSubmit = async (data: TaskFormData) => {
     if (!socket) {
       console.error("❌ Socket pipeline is offline. Cannot broadcast payload.");
+      setServerError(
+        "The task connection is still starting. Please try again.",
+      );
       return;
     }
 
     try {
+      setServerError(null);
       const payload = {
         title: data.title,
         category: data.category,
@@ -68,9 +91,14 @@ export default function TaskForm() {
         city: data.spatialData.city,
         country: data.spatialData.country,
       };
+      const result = (await socket
+        .timeout(10000)
+        .emitWithAck("broadcast-task", payload)) as BroadcastTaskAck;
 
-      console.log({ payload });
-      socket.emit("broadcast-task", payload);
+      if (!result.ok) {
+        setServerError(result.message || "The task could not be saved.");
+        return;
+      }
 
       reset({
         title: "",
@@ -78,10 +106,10 @@ export default function TaskForm() {
         dueDate: "",
         spatialData: undefined,
       });
-
-      dropdownRef.current?.clear();
+      setLocationResetSignal((prev) => prev + 1);
     } catch (err) {
       console.error("❌ Failed broadcasting spatial task entry:", err);
+      setServerError("The task could not be saved. Please try again.");
     }
   };
 
@@ -98,6 +126,12 @@ export default function TaskForm() {
           Deploy fresh spatial task arrays onto the coordinate engine
         </p>
       </div>
+
+      {serverError && (
+        <p className="text-[10px] font-mono text-rose-500 text-left">
+          {serverError}
+        </p>
+      )}
 
       <div className="space-y-1">
         <label className="text-xs font-mono font-bold text-slate-400 dark:text-slate-500 text-left block">
@@ -138,6 +172,7 @@ export default function TaskForm() {
           <input
             {...register("dueDate")}
             type="date"
+            min={todayString}
             className="w-full text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 outline-none focus:border-indigo-500 text-slate-900 dark:text-slate-100"
           />
           {errors.dueDate && (
@@ -153,8 +188,8 @@ export default function TaskForm() {
         control={control}
         render={({ field }) => (
           <LocationDropdown
+            key={locationResetSignal}
             onLocationSelect={(data) => field.onChange(data)}
-            ref={dropdownRef}
           />
         )}
       />
@@ -184,7 +219,7 @@ export default function TaskForm() {
         disabled={isSubmitting}
         className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 text-white font-sans text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer disabled:cursor-not-allowed shadow-md shadow-indigo-600/10"
       >
-        Broadcast Spatial Task Node
+        {isSubmitting ? "Broadcasting..." : "Broadcast Spatial Task Node"}
       </button>
     </form>
   );

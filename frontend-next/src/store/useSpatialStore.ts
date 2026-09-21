@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { io, type Socket } from "socket.io-client";
+import { backendUrl } from "@/lib/backend-url";
 
 export type Timeframe = "all" | "future" | "past";
 export type SortBy = "createdAt" | "dueDate" | "distance";
@@ -24,6 +25,13 @@ export interface PaginationMeta {
   totalPages: number;
 }
 
+export interface MapBounds {
+  minLat: number;
+  maxLat: number;
+  minLng: number;
+  maxLng: number;
+}
+
 export interface SpatialTodo {
   id: string;
   title: string;
@@ -45,21 +53,22 @@ interface SpatialState {
   filteredTodos: SpatialTodo[];
   filters: TodoFilters;
   pagination: PaginationMeta;
-
+  mapBounds: MapBounds | null;
   selectedTaskLocation: [number, number] | null;
   crosshairPosition: [number, number] | null;
-
-  initStore: () => void;
-  fetchAllTodos: () => Promise<void>;
+  initStore: () => (() => void) | undefined;
+  fetchMapTodos: (bounds: MapBounds) => Promise<void>;
   fetchTodos: (overrides?: Partial<TodoFilters>) => Promise<void>;
   setFilters: (filters: Partial<TodoFilters>) => void;
   setTaskLocation: (lat: number, lng: number) => void;
   setCrosshairPosition: (lat: number, lng: number) => void;
-
   removeTodo: (id: string) => void;
 }
 
 let latestFetchId = 0;
+let latestMapFetchId = 0;
+let mapRequestController: AbortController | null = null;
+let todosRequestController: AbortController | null = null;
 
 export const useSpatialStore = create<SpatialState>((set, get) => ({
   socket: null,
@@ -79,22 +88,47 @@ export const useSpatialStore = create<SpatialState>((set, get) => ({
     limit: 10,
     totalPages: 1,
   },
+  mapBounds: null,
   selectedTaskLocation: null,
   crosshairPosition: null,
 
-  fetchAllTodos: async () => {
-    const response = await fetch(
-      "http://localhost:4000/api/todos?timeframe=all&sortBy=createdAt&page=1&limit=10000",
-    );
-    if (!response.ok) throw new Error("Failed to fetch all spatial tasks");
+  fetchMapTodos: async (bounds) => {
+    const fetchId = ++latestMapFetchId;
+    mapRequestController?.abort();
+    const requestController = new AbortController();
+    mapRequestController = requestController;
 
-    const data = await response.json();
-    set({ todos: data.items ?? [] });
+    const url = new URL(`${backendUrl}/api/todos/map`);
+    url.search = new URLSearchParams({
+      minLat: String(bounds.minLat),
+      maxLat: String(bounds.maxLat),
+      minLng: String(bounds.minLng),
+      maxLng: String(bounds.maxLng),
+    }).toString();
+
+    try {
+      const response = await fetch(url, {
+        signal: requestController.signal,
+      });
+      if (!response.ok) throw new Error("Failed to fetch visible map tasks");
+
+      const data = await response.json();
+      if (fetchId !== latestMapFetchId) return;
+      set({ todos: data.items ?? [] });
+    } catch (error) {
+      if (requestController.signal.aborted) return;
+      throw error;
+    }
   },
 
   fetchTodos: async (overrides = {}) => {
     const filters = { ...get().filters, ...overrides };
     const fetchId = ++latestFetchId;
+    todosRequestController?.abort();
+    const requestController = new AbortController();
+    todosRequestController = requestController;
+
+    const url = new URL(`${backendUrl}/api/todos`);
     const params = new URLSearchParams({
       search: filters.search,
       timeframe: filters.timeframe,
@@ -112,65 +146,100 @@ export const useSpatialStore = create<SpatialState>((set, get) => ({
       params.set("maxDistanceKm", String(filters.maxDistanceKm));
     }
 
-    const response = await fetch(`http://localhost:4000/api/todos?${params}`);
-    if (!response.ok) throw new Error("Failed to fetch spatial tasks");
+    url.search = params.toString();
 
-    const data = await response.json();
-    if (fetchId !== latestFetchId) return;
+    try {
+      const response = await fetch(url, {
+        signal: requestController.signal,
+      });
+      if (!response.ok) throw new Error("Failed to fetch spatial tasks");
 
-    set({
-      filters,
-      filteredTodos: data.items ?? [],
-      pagination: data.pagination ?? {
-        total: data.items?.length ?? 0,
-        page: filters.page,
-        limit: filters.limit,
-        totalPages: 1,
-      },
-    });
+      const data = await response.json();
+      if (fetchId !== latestFetchId) return;
+
+      set({
+        filters,
+        filteredTodos: data.items ?? [],
+        mapBounds: data.mapBounds ?? null,
+        pagination: data.pagination ?? {
+          total: data.items?.length ?? 0,
+          page: filters.page,
+          limit: filters.limit,
+          totalPages: 1,
+        },
+      });
+    } catch (error) {
+      if (requestController.signal.aborted) return;
+      throw error;
+    }
   },
 
   setFilters: (updates) => {
-    const nextFilters = { ...get().filters, ...updates };
+    const currentFilters = get().filters;
+
+    // 1. Check if the user is changing pages vs changing query parameters
+    const isPageChange = "page" in updates || "limit" in updates;
+
+    // 2. Safely calculate the targeted page layer
+    const targetPage = isPageChange ? (updates.page ?? currentFilters.page) : 1;
+    const targetLimit = updates.limit ?? currentFilters.limit;
+
+    const nextFilters = {
+      ...currentFilters,
+      ...updates,
+      page: targetPage,
+      limit: targetLimit,
+    };
+
+    // 3. Keep BOTH in sync so the backend API data doesn't break your UI
     set({
       filters: nextFilters,
       pagination: {
         ...get().pagination,
-        page: nextFilters.page,
-        limit: nextFilters.limit,
+        page: targetPage,
+        limit: targetLimit,
       },
     });
+
+    // 4. Trigger backend refresh with the fresh filters mapping
     void get().fetchTodos(nextFilters);
   },
 
   initStore: () => {
     if (get().socket) return;
 
-    get().fetchAllTodos().catch((err) =>
-      console.error("❌ Failed full spatial fetch:", err),
-    );
-    get().fetchTodos().catch((err) =>
-      console.error("❌ Failed filtered spatial fetch:", err),
-    );
+    get()
+      .fetchTodos()
+      .catch((err) => console.error("❌ Failed filtered spatial fetch:", err));
 
-    const socketInstance = io("http://localhost:4000", {
+    const socketInstance = io(backendUrl, {
       withCredentials: true,
       transports: ["polling", "websocket"],
     });
 
-    socketInstance.on("task-synced", (newRows: SpatialTodo[] | SpatialTodo) => {
+    const taskSyncedHandler = (newRows: SpatialTodo[] | SpatialTodo) => {
       const rowsArray = Array.isArray(newRows) ? newRows : [newRows];
       set((state) => ({
         todos: [...rowsArray, ...state.todos],
       }));
       void get().fetchTodos();
-    });
+    };
 
-    socketInstance.on("task-deleted", (deletedId: string) => {
+    const taskDeletedHandler = (deletedId: string) => {
       get().removeTodo(deletedId);
-    });
+    };
+
+    socketInstance.on("task-synced", taskSyncedHandler);
+    socketInstance.on("task-deleted", taskDeletedHandler);
 
     set({ socket: socketInstance });
+
+    return () => {
+      socketInstance.off("task-synced", taskSyncedHandler);
+      socketInstance.off("task-deleted", taskDeletedHandler);
+      socketInstance.disconnect();
+      set({ socket: null });
+    };
   },
 
   setTaskLocation: (lat, lng) => {

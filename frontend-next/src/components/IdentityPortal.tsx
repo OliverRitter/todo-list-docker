@@ -16,13 +16,28 @@ const authSchema = z.object({
 
 type AuthFormData = z.infer<typeof authSchema>;
 
+type AuthUser = {
+  id?: string;
+  email?: string;
+  name?: string | null;
+};
+
+type BetterAuthSuccessContext = {
+  data?: { user?: AuthUser };
+};
+
+type BetterAuthErrorContext = {
+  error?: { code?: string; message?: string };
+};
+
 interface IdentityPortalProps {
-  onAuthSuccess: (user: any) => void;
+  onAuthSuccess: (user: AuthUser) => void;
 }
 
 export default function IdentityPortal({ onAuthSuccess }: IdentityPortalProps) {
   const [isSignUpMode, setIsSignUpMode] = useState<boolean>(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [isExpectedAuthNotice, setIsExpectedAuthNotice] = useState(false);
 
   const {
     register,
@@ -37,11 +52,13 @@ export default function IdentityPortal({ onAuthSuccess }: IdentityPortalProps) {
   const handleModeToggle = () => {
     setIsSignUpMode((prev) => !prev);
     setServerError(null);
+    setIsExpectedAuthNotice(false);
     reset();
   };
 
   const onSubmit = async (values: AuthFormData) => {
     setServerError(null);
+    setIsExpectedAuthNotice(false);
 
     if (isSignUpMode) {
       if (!values.name || values.name.trim().length < 2) {
@@ -59,11 +76,16 @@ export default function IdentityPortal({ onAuthSuccess }: IdentityPortalProps) {
         },
         {
           onRequest: () => setServerError(null),
-          onSuccess: (ctx: any) => {
+          onSuccess: (ctx: BetterAuthSuccessContext) => {
             if (ctx?.data?.user) onAuthSuccess(ctx.data.user);
           },
-          onError: (ctx: any) => {
-            console.error("Better-Auth registration trace:", ctx.error);
+          onError: (ctx: BetterAuthErrorContext) => {
+            const isExpectedRejection =
+              ctx.error?.code === "USER_ALREADY_EXISTS";
+            if (!isExpectedRejection) {
+              console.error("Better-Auth registration trace:", ctx.error);
+            }
+            setIsExpectedAuthNotice(isExpectedRejection);
             setServerError(
               ctx.error?.message ||
                 "An unexpected registration error occurred.",
@@ -79,11 +101,17 @@ export default function IdentityPortal({ onAuthSuccess }: IdentityPortalProps) {
         },
         {
           onRequest: () => setServerError(null),
-          onSuccess: (ctx: any) => {
+          onSuccess: (ctx: BetterAuthSuccessContext) => {
             if (ctx?.data?.user) onAuthSuccess(ctx.data.user);
           },
-          onError: (ctx: any) => {
-            console.error("Better-Auth sign-in trace:", ctx.error);
+          onError: (ctx: BetterAuthErrorContext) => {
+            const isExpectedRejection =
+              ctx.error?.code === "USER_NOT_FOUND" ||
+              ctx.error?.code === "INVALID_EMAIL_OR_PASSWORD";
+            if (!isExpectedRejection) {
+              console.error("Better-Auth sign-in trace:", ctx.error);
+            }
+            setIsExpectedAuthNotice(isExpectedRejection);
             setServerError(
               ctx.error?.message ||
                 "Invalid email address or secure password verification.",
@@ -109,11 +137,17 @@ export default function IdentityPortal({ onAuthSuccess }: IdentityPortalProps) {
         </div>
 
         {serverError && (
-          <div className="p-4 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 rounded-xl flex items-start gap-3 text-xs text-rose-600 dark:text-rose-400">
+          <div
+            className={`p-4 rounded-xl flex items-start gap-3 text-xs border ${
+              isExpectedAuthNotice
+                ? "bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/50 text-amber-700 dark:text-amber-400"
+                : "bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50 text-rose-600 dark:text-rose-400"
+            }`}
+          >
             <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
             <div>
               <p className="font-bold uppercase tracking-wider mb-0.5">
-                Gateway Rejection
+                {isExpectedAuthNotice ? "Account Status" : "Gateway Rejection"}
               </p>
               <p className="font-mono">{serverError}</p>
             </div>

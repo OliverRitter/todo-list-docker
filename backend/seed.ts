@@ -62,15 +62,13 @@ async function seedSpatialCore() {
 
     for (const pt of points) {
       await db.execute(sql`
-        INSERT INTO todos (title, category, due_date, creator_id, creator_name, lat, lng, city, country, location, created_at)
+        INSERT INTO todos (title, category, due_date, creator_id, creator_name, city, country, location, created_at)
         VALUES (
           ${pt.title}, 
           ${pt.cat}, 
           NOW() + INTERVAL '9 days', 
           ${testUserId}, 
           'Oliver Spatial Dev', 
-          ${String(pt.lat)}, 
-          ${String(pt.lng)}, 
           ${pt.city}, 
           ${pt.country}, 
           ST_SetSRID(ST_MakePoint(${pt.lng}, ${pt.lat}), 4326), 
