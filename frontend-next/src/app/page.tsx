@@ -1,6 +1,6 @@
 "use client";
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useSession, authClient } from "@/lib/auth-client";
 import { useSpatialStore } from "@/store/useSpatialStore";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -9,10 +9,19 @@ import ThemeToggle from "@/components/ThemeToggle";
 // import TaskList from "@/components/TaskList";
 import IdentityPortal from "@/components/IdentityPortal";
 import { Button } from "@/components/ui/button";
-import { LogOut, MapPin, PanelLeftClose, PanelLeftOpen } from "lucide-react";
-// import { motion } from "framer-motion"; // 1. Imported framer-motion
+import { LogOut, MapPin } from "lucide-react";
+import { motion } from "framer-motion";
 import SidebarHeader from "@/components/SidebarHeader";
 import SidebarContent from "@/components/SidebarContent";
+
+const subscribeToDesktopBreakpoint = (callback: () => void) => {
+  const mediaQuery = window.matchMedia("(min-width: 1024px)");
+  mediaQuery.addEventListener("change", callback);
+  return () => mediaQuery.removeEventListener("change", callback);
+};
+
+const getDesktopBreakpoint = () =>
+  window.matchMedia("(min-width: 1024px)").matches;
 
 const SpatialMap = dynamic(() => import("@/components/SpatialMap"), {
   ssr: false,
@@ -25,7 +34,15 @@ const SpatialMap = dynamic(() => import("@/components/SpatialMap"), {
 
 export default function Home() {
   const { data: session, isPending } = useSession();
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const isDesktop = useSyncExternalStore(
+    subscribeToDesktopBreakpoint,
+    getDesktopBreakpoint,
+    () => false,
+  );
+  const [sidebarOpenOverride, setSidebarOpenOverride] = useState<boolean | null>(
+    null,
+  );
+  const isSidebarOpen = sidebarOpenOverride ?? isDesktop;
   const [sidebarView, setSidebarView] = useState<"form" | "explore">("form");
   const todos = useSpatialStore((state) => state.todos);
   const filteredTodos = useSpatialStore((state) => state.filteredTodos);
@@ -73,17 +90,46 @@ export default function Home() {
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-slate-50 text-slate-900 transition-colors duration-300 dark:bg-slate-950 dark:text-slate-50">
-      <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 px-4 dark:border-slate-800 sm:px-6">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-indigo-600 rounded-xl shadow-lg text-white">
-            <MapPin className="h-5 w-5" />
+    <div className="flex h-dvh flex-col overflow-hidden bg-slate-50 text-slate-900 transition-colors duration-300 dark:bg-slate-950 dark:text-slate-50">
+      <header className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-slate-200 px-3 dark:border-slate-800 sm:px-6">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <motion.button
+            type="button"
+            onClick={() => setSidebarOpenOverride(!isSidebarOpen)}
+            className="relative inline-flex size-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition-colors hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900 sm:size-10"
+            animate={{ rotate: isSidebarOpen ? 90 : 0 }}
+            whileHover={{ scale: 1.06 }}
+            whileTap={{ scale: 0.9 }}
+            transition={{ type: "spring", stiffness: 360, damping: 22 }}
+            aria-label={isSidebarOpen ? "Hide sidebar" : "Show sidebar"}
+            aria-expanded={isSidebarOpen}
+            aria-controls="task-sidebar"
+            title={isSidebarOpen ? "Hide sidebar" : "Show sidebar"}
+          >
+            <motion.span
+              className="absolute h-0.5 w-[18px] rounded-full bg-current"
+              animate={{ y: isSidebarOpen ? 0 : -6, rotate: isSidebarOpen ? 45 : 0 }}
+              transition={{ type: "spring", stiffness: 420, damping: 24 }}
+            />
+            <motion.span
+              className="absolute h-0.5 w-[18px] rounded-full bg-current"
+              animate={{ opacity: isSidebarOpen ? 0 : 1, scaleX: isSidebarOpen ? 0.4 : 1 }}
+              transition={{ duration: 0.16 }}
+            />
+            <motion.span
+              className="absolute h-0.5 w-[18px] rounded-full bg-current"
+              animate={{ y: isSidebarOpen ? 0 : 6, rotate: isSidebarOpen ? -45 : 0 }}
+              transition={{ type: "spring", stiffness: 420, damping: 24 }}
+            />
+          </motion.button>
+          <div className="shrink-0 rounded-xl bg-indigo-600 p-2 text-white shadow-lg sm:p-2.5">
+            <MapPin className="size-4 sm:size-5" />
           </div>
-          <div>
-            <h1 className="inline-block text-xl font-black spatial-gradient bg-clip-text text-transparent tracking-wider animate-smooth-gradient">
+          <div className="min-w-0">
+            <h1 className="block truncate text-sm font-black spatial-gradient bg-clip-text text-transparent tracking-wider animate-smooth-gradient sm:text-xl">
               G2 SPATIAL CORE
             </h1>
-            <p className="text-[10px] font-mono text-slate-400">
+            <p className="hidden truncate text-[10px] font-mono text-slate-400 sm:block">
               Authenticated as:{" "}
               <span className="text-indigo-400 font-bold">
                 {session.user.email}
@@ -92,7 +138,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           <ThemeToggle />
           <Button
             variant="outline"
@@ -109,41 +155,29 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="relative flex min-h-0 flex-1">
-        <aside
-          className={`thin-scrollbar absolute inset-y-0 left-0 z-20 flex w-[min(90vw,380px)] min-h-0 flex-col gap-4 overflow-y-auto border-r border-slate-200 bg-slate-50 p-4 shadow-2xl transition-[transform,width] duration-300 ease-out dark:border-slate-800 dark:bg-slate-950 lg:relative lg:shrink-0 lg:overflow-hidden lg:p-5 lg:shadow-none ${
-            isSidebarOpen
-              ? "translate-x-0 lg:w-[380px]"
-              : "-translate-x-full lg:w-0 lg:border-r-0 lg:p-0"
-          }`}
+      <main className="relative flex h-[calc(100dvh-4rem)] min-h-0">
+        <motion.aside
+          id="task-sidebar"
+          className="absolute inset-y-0 left-0 z-20 flex min-h-0 flex-col overflow-hidden border-r border-slate-200 bg-slate-50 shadow-2xl dark:border-slate-800 dark:bg-slate-950 lg:relative lg:shrink-0 lg:shadow-none"
+          animate={{
+            width: isDesktop
+              ? isSidebarOpen
+                ? 380
+                : 0
+              : "min(90vw, 380px)",
+            x: isDesktop || isSidebarOpen ? 0 : "-100%",
+            borderRightWidth: isDesktop && !isSidebarOpen ? 0 : 1,
+          }}
+          transition={{ type: "spring", stiffness: 260, damping: 32 }}
+          aria-hidden={!isSidebarOpen}
         >
-          <SidebarHeader view={sidebarView} setView={setSidebarView} />
+          <div className="thin-scrollbar flex h-full w-[min(90vw,380px)] shrink-0 flex-col gap-4 overflow-y-auto p-4 lg:w-[380px] lg:p-5">
+            <SidebarHeader view={sidebarView} setView={setSidebarView} />
+            <SidebarContent view={sidebarView} />
+          </div>
+        </motion.aside>
 
-          <button
-            type="button"
-            onClick={() => setIsSidebarOpen(false)}
-            className="absolute right-3 top-3 z-10 inline-flex size-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
-            title="Hide sidebar"
-          >
-            <PanelLeftClose className="size-4" />
-          </button>
-
-          <SidebarContent view={sidebarView} />
-        </aside>
-
-        {!isSidebarOpen && (
-          <button
-            type="button"
-            onClick={() => setIsSidebarOpen(true)}
-            className="absolute left-4 top-4 z-20 inline-flex size-10 items-center justify-center rounded-xl border border-slate-200 bg-white/95 text-slate-600 shadow-lg backdrop-blur transition-colors hover:bg-white dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-300 dark:hover:bg-slate-800"
-            title="Show sidebar"
-            aria-label="Show sidebar"
-          >
-            <PanelLeftOpen className="size-5" />
-          </button>
-        )}
-
-        <div className="min-h-0 min-w-0 flex-1">
+        <div className="h-full min-h-0 min-w-0 flex-1">
           <SpatialMap
             todos={todos}
             filteredTodos={filteredTodos}

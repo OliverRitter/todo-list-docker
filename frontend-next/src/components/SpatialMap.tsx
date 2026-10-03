@@ -38,7 +38,7 @@ export default function SpatialMap({
   }, []);
 
   return (
-    <div className="relative z-0 h-full w-full overflow-hidden border-l border-slate-200 shadow-sm dark:border-slate-800">
+    <div className="relative z-0 h-full min-h-0 w-full overflow-hidden border-l border-slate-200 shadow-sm dark:border-slate-800">
       <MapContainer
         center={[0, 0]}
         zoom={2}

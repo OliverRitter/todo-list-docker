@@ -10,9 +10,9 @@ interface SidebarContentProps {
 }
 
 const viewVariants = {
-  initial: { opacity: 0.2, y: 26 },
+  initial: { opacity: 0, y: 10 },
   animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0.2, y: 26 },
+  exit: { opacity: 0, y: -6 },
 };
 
 export default function SidebarContent({ view }: SidebarContentProps) {
@@ -26,7 +26,7 @@ export default function SidebarContent({ view }: SidebarContentProps) {
             initial="initial"
             animate="animate"
             exit="exit"
-            transition={{ duration: 0.5, ease: "linear" }}
+            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
             className="shrink-0 w-full"
           >
             <TaskForm />
@@ -38,7 +38,7 @@ export default function SidebarContent({ view }: SidebarContentProps) {
             initial="initial"
             animate="animate"
             exit="exit"
-            transition={{ duration: 0.5, ease: "linear" }}
+            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
             className="thin-scrollbar min-h-0 space-y-4 overflow-y-auto flex-1 flex flex-col"
           >
             <TaskFilters />
