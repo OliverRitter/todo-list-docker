@@ -11,9 +11,18 @@ COPY . .
 EXPOSE 4000
 CMD ["npx", "tsx", "--watch", "src/index.ts"]
 
-# ---- production: no TS build step exists yet, so tsx (devDependency) still runs at runtime ----
-FROM base AS production
+# ---- compile TypeScript in a build stage ----
+FROM base AS builder
 RUN npm ci
 COPY . .
+RUN npm run build
+
+# ---- production: only runtime dependencies and compiled JavaScript ----
+FROM node:22-alpine AS production
+WORKDIR /app
+ENV NODE_ENV=production
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+COPY --from=builder /app/dist ./dist
 EXPOSE 4000
-CMD ["npx", "tsx", "src/index.ts"]
+CMD ["node", "dist/index.js"]

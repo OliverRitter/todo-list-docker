@@ -4,13 +4,13 @@ import { useEffect, useState } from "react";
 import { useSession, authClient } from "@/lib/auth-client";
 import { useSpatialStore } from "@/store/useSpatialStore";
 import ThemeToggle from "@/components/ThemeToggle";
-import TaskForm from "@/components/TaskForm";
-import TaskFilters from "@/components/TaskFilters";
-import TaskList from "@/components/TaskList";
+// import TaskForm from "@/components/TaskForm";
+// import TaskFilters from "@/components/TaskFilters";
+// import TaskList from "@/components/TaskList";
 import IdentityPortal from "@/components/IdentityPortal";
 import { Button } from "@/components/ui/button";
 import { LogOut, MapPin, PanelLeftClose, PanelLeftOpen } from "lucide-react";
-import { motion } from "framer-motion"; // 1. Imported framer-motion
+// import { motion } from "framer-motion"; // 1. Imported framer-motion
 import SidebarHeader from "@/components/SidebarHeader";
 import SidebarContent from "@/components/SidebarContent";
 
@@ -80,7 +80,7 @@ export default function Home() {
             <MapPin className="h-5 w-5" />
           </div>
           <div>
-            <h1 className="text-xl font-black bg-gradient-to-r from-indigo-500 to-emerald-400 bg-clip-text text-transparent tracking-wider">
+            <h1 className="inline-block text-xl font-black spatial-gradient bg-clip-text text-transparent tracking-wider animate-smooth-gradient">
               G2 SPATIAL CORE
             </h1>
             <p className="text-[10px] font-mono text-slate-400">
@@ -117,7 +117,6 @@ export default function Home() {
               : "-translate-x-full lg:w-0 lg:border-r-0 lg:p-0"
           }`}
         >
-          {/* Modern Clean Imported Sub-components */}
           <SidebarHeader view={sidebarView} setView={setSidebarView} />
 
           <button

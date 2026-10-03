@@ -1,0 +1,65 @@
+name: spatial-todo-prod
+
+services:
+  database_postgres:
+    image: postgis/postgis:16-3.4-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env.production}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env.production}
+    volumes:
+      - g2_prod_db_store:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 4s
+      timeout: 4s
+      retries: 5
+    restart: unless-stopped
+
+  backend_node:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@database_postgres:5432/${POSTGRES_DB}
+      FRONTEND_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN in .env.production}
+    command: sh -c "node dist/db/bootstrap.js && node dist/index.js"
+    depends_on:
+      database_postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend_next:
+    build:
+      context: ./frontend-next
+      dockerfile: Dockerfile
+      target: production
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@database_postgres:5432/${POSTGRES_DB}
+      BETTER_AUTH_URL: ${APP_ORIGIN:?Set APP_ORIGIN in .env.production}
+      FRONTEND_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN in .env.production}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in .env.production}
+      HOSTNAME: 0.0.0.0
+    depends_on:
+      - backend_node
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    environment:
+      BACKEND_UPSTREAM: backend_node:4000
+      FRONTEND_UPSTREAM: frontend_next:3000
+      NGINX_ENVSUBST_FILTER: ^(BACKEND_UPSTREAM|FRONTEND_UPSTREAM)$
+    volumes:
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      - backend_node
+      - frontend_next
+    restart: unless-stopped
+
+volumes:
+  g2_prod_db_store:
+    name: spatial-todo-production-db

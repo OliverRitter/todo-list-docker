@@ -14,4 +14,4 @@ This is the frontend for the spatial task application. Keep UI behavior in `src/
 
 From this directory, run `npm run lint` and `npm run build` after frontend changes. There is currently no automated test script; verify responsive behavior manually at mobile and desktop widths when sizing is involved.
 
-See [README.md](README.md) for the generated Next.js getting-started notes and [../docker-compose.yml](../docker-compose.yml) for the local multi-service setup.
+See [README.md](README.md) for the generated Next.js getting-started notes and [../compose.dev.yaml](../compose.dev.yaml) plus [../compose.prod.yaml](../compose.prod.yaml) for the local and production service setups.

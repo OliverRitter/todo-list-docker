@@ -1,6 +1,6 @@
 # Project Guidance
 
-This repository is a spatial todo app with a Next.js frontend, an Express/Socket.IO backend, and PostgreSQL/PostGIS running through Docker Compose. Read [README.md](README.md), [frontend-next/AGENTS.md](frontend-next/AGENTS.md), and [docker-compose.yml](docker-compose.yml) for local context before changing a service boundary.
+This repository is a spatial todo app with a Next.js frontend, an Express/Socket.IO backend, and PostgreSQL/PostGIS running through Docker Compose. Read [README.md](README.md), [frontend-next/AGENTS.md](frontend-next/AGENTS.md), [compose.dev.yaml](compose.dev.yaml), and [compose.prod.yaml](compose.prod.yaml) for local context before changing a service boundary.
 
 ## Provider Boundaries
 

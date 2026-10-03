@@ -7,7 +7,7 @@ import { configureSocket } from "./realtime/socket.js";
 
 const app = express();
 const httpServer = createServer(app);
-const frontendOrigin = process.env.FRONTEND_ORIGIN || "http://localhost:3000";
+const frontendOrigin = process.env.FRONTEND_ORIGIN || "http://localhost:8080";
 
 app.use(cors({ origin: frontendOrigin, credentials: true }));
 app.use(express.json());

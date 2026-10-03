@@ -33,6 +33,8 @@ export default function ThemeToggle() {
       size="icon"
       onClick={() => setIsDark((prev) => !prev)}
       className="rounded-xl cursor-pointer"
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
     >
       {isDark ? (
         <Sun className="h-5 w-5 text-amber-400" />
